@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"net/http"
 
 	// The decoder uses wav's PCM buffer directly; no separate audio package import is needed.
 	"github.com/go-audio/wav"
@@ -107,4 +108,34 @@ func DecodeMP3(r io.Reader) (*AudioData, error) {
 		Samples:    monoSamples,
 		SampleRate: sampleRate,
 	}, nil
+}
+
+// DecodeAudio detects MIME type and routes to the correct decoder
+func DecodeAudio(r io.ReadSeeker) (*AudioData, error) {
+	// read first 512 bytes to sniff the MIME type
+	buf := make([]byte, 0)
+	n, err := r.Read(buf)
+	if err != nil && err != io.EOF {
+		return nil, fmt.Errorf("failed to inspect audio file header: %w", err)
+	}
+
+	// reset reader to init position
+	_, err = r.Seek(0, io.SeekStart)
+	if err != nil {
+		return nil, fmt.Errorf("failed to reset stream offset: %w", err)
+	}
+
+	mimeType := http.DetectContentType(buf[:n])
+	switch {
+	case mimeType == "audio/x-wav" || mimeType == "audio/wav":
+		return DecodeWAV(r)
+	case mimeType == "audio/mpeg" || mimeType == "audio/mp3":
+		return DecodeMP3(r)
+	default:
+		// mp3 decoding as a fallback if sniffing returns octet stream
+		if data, mp3Err := DecodeMP3(r); mp3Err == nil {
+			return data, nil
+		}
+		return nil, fmt.Errorf("unsupported audio format: %s", mimeType)
+	}
 }

@@ -35,7 +35,15 @@
 
     - what are mono samples?
     The term Mono (monophonic) refers to the number of audio channels being recorded or played back:
-        - Stereo Audio (2 Channels): Has two separate channels—Left (L) and Right (R). In raw PCM memory, stereo data interleaves these channels:{Memory: } [L_1, R_1, L_2, R_2, L_3, R_3,]
+        - Stereo Audio (2 Channels): Has two separate channels—Left (L) and Right (R). In raw PCM memory, stereo data interleaves these channels:Memory:  [L_1, R_1, L_2, R_2, L_3, R_3,]
         - Mono Audio (1 Channel): Contains only a single stream of audio samples meant to be played equally through all speakers:Memory:  [S_1, S_2, S_3, S_4,]
         
 - mp3: follows lossy compression 
+    - wav contains pcm directly, so retrieval is direct
+    - mp3 is decoded to pcm then forwarded to fft 
+    
+* Bit-Depth Normalization ($1/\text{maxVal}$):A 16-bit audio file records sample amplitudes as integers from $-32,768$ to $+32,767$. Dividing by $2^{15} = 32,768$ scales all amplitudes to $[-1.0, 1.0]$. This ensures volume variations do not break our frequency calculations later.
+
+* Stereo to Mono Downmixing:If an audio file has left and right channels ($C_L, C_R$), we take the channel average for each frame:
+$$S_{\text{mono}}[i] = \frac{C_L[i] + C_R[i]}{2}$$
+This reduces the data volume by half while preserving all frequency components.
