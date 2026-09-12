@@ -24,7 +24,7 @@
     ```
     
 * Because computers cannot store continuous infinite values, they must digitize the wave in two steps:
-    - Sampling (Time Domain): The computer measures (samples) the amplitude of the electrical wave thousands of times per second. The number of measurements per second is the Sample Rate (measured in Hertz.
+    - Sampling (Time Domain): The computer measures (samples) the amplitude of the electrical wave thousands of times per second. The number of measurements per second is the Sample Rate (measured in Hertz).
   
     - Common sample rate: 44,100 Hz (CD quality, meaning 44,100 individual measurements per second) or 22,050 Hz.
         - Quantization (Amplitude Domain): Each sampled measurement is converted into a discrete number (an integer). The precision of this number is determined by the Bit Depth.
@@ -47,3 +47,26 @@
 * Stereo to Mono Downmixing:If an audio file has left and right channels ($C_L, C_R$), we take the channel average for each frame:
 $$S_{\text{mono}}[i] = \frac{C_L[i] + C_R[i]}{2}$$
 This reduces the data volume by half while preserving all frequency components.
+
+* **stft** 
+a standard fft when applied on an entire audio file strips down the time domain while keeping frequency or note occured, if we want to identify which song is being played we need to know the frequency as well as the timestamp. 
+
+This problem is solved by stft - short time fourier transform, which uses a sliding window approach. 
+
+frame chunking and hop overlapping, Why:-
+- Window Size ($N = 2048$): We take a slice of $2048$ audio samples. At $44.1\text{ kHz}$ sample rate, $2048$ samples corresponds to $\approx 46.4\text{ ms}$ of audio.
+- Hop Size ($H = 512$): Instead of jumping forward by $2048$ samples for the next chunk, we only jump forward by $512$ samples ($\approx 11.6\text{ ms}$). This creates a $75\%$ overlap ($1536$ shared samples) between consecutive frames.
+- Why overlap? Audio events like drum hits or fast guitar strums happen quickly. Overlapping ensures that transients occurring near the boundary of one frame aren't lost or distorted.
+
+Applying the Hann Window Function:-
+If you chop a raw audio wave abruptly into a $2048$-sample slice, the left and right edges will likely cut off mid-wave, creating sharp artificial step-discontinuities. In FFT mathematics, sharp sharp edges create fake high frequencies called Spectral Leakage.
+
+To fix this, we multiply the $2048$ samples by a Hann Window curve before running FFT:
+$$w[n] = 0.5 \times \left(1 - \cos\left(\frac{2\pi n}{N - 1}\right)\right)$$
+
+The FFT Computation & Positive Bins:-
+- Complex Numbers ($a + bi$): FFT outputs an array of $2048$ complex numbers.
+- Symmetry: For real-valued audio signals, the second half of the FFT output ($1024$ to $2047$) is a mirrored complex conjugate of the first half ($0$ to $1023$). Thus, we discard the top half and keep only the first $N/2 = 1024$ frequency bins.
+- Calculating Magnitude: For each bin $f$, we compute its magnitude (loudness):
+$$\text{Magnitude} = \vert{}a + bi\vert{} = \sqrt{a^2 + b^2}$$
+

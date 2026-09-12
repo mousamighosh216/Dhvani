@@ -126,10 +126,10 @@ func DecodeAudio(r io.ReadSeeker) (*AudioData, error) {
 	}
 
 	mimeType := http.DetectContentType(buf[:n])
-	switch {
-	case mimeType == "audio/x-wav" || mimeType == "audio/wav":
+	switch mimeType {
+	case "audio/x-wav", "audio/wav":
 		return DecodeWAV(r)
-	case mimeType == "audio/mpeg" || mimeType == "audio/mp3":
+	case "audio/mpeg", "audio/mp3":
 		return DecodeMP3(r)
 	default:
 		// mp3 decoding as a fallback if sniffing returns octet stream
