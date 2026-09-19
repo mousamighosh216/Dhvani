@@ -70,3 +70,4 @@ The FFT Computation & Positive Bins:-
 - Calculating Magnitude: For each bin $f$, we compute its magnitude (loudness):
 $$\text{Magnitude} = \vert{}a + bi\vert{} = \sqrt{a^2 + b^2}$$
 
+* we can kind off assume that its loosly like laplace, which converts complex equations into exponent based eqs. 
