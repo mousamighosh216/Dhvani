@@ -71,3 +71,10 @@ The FFT Computation & Positive Bins:-
 $$\text{Magnitude} = \vert{}a + bi\vert{} = \sqrt{a^2 + b^2}$$
 
 * we can kind off assume that its loosly like laplace, which converts complex equations into exponent based eqs. 
+
+* matcher logic: for a 5sec audio clip there may exist multiple matches for it across thousands of songs. 
+
+here, logic we are using is that, the timestamp across that clip should match the time offset inside original recording. 
+$$\text{Time Offset} = t_{\text{database}} - t_{\text{query}}$$
+
+for a wrong song matches would occur at random timestamps, for correct ones fingerprint will provide exact match.
