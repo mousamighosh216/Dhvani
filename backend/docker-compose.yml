@@ -1,0 +1,18 @@
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: dhvani-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: dhvani_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # Automatically runs your migration script on container initialization
+      - ./database/migrations:/docker-entrypoint-initdb.d
+
+volumes:
+  pgdata:
