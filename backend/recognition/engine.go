@@ -1,60 +1,42 @@
-// Package recognition wires the DSP pipeline into one Engine.
+// Package recognition ties decoding, STFT, peaks, hashing and matching together.
 package recognition
 
 import (
 	"context"
-	"errors"
 
-	"dhwani/recognition/audio"
+	"dhwani/metadata"
 	"dhwani/recognition/fft"
 	"dhwani/recognition/fingerprint"
 	"dhwani/recognition/matcher"
 	"dhwani/recognition/peaks"
 )
 
-// ErrTooShort is returned for audio shorter than one STFT window.
-var ErrTooShort = errors.New("recognition: audio is too short")
+const (
+	WindowSize = 2048
+	Hop        = 512 // 75% overlap
+	PeakDT     = 12  // 25-frame neighbourhood
+	PeakDF     = 15  // 31-bin neighbourhood
+	RangeDB    = 30
+)
 
-// Engine is the contract used by the API layer.
-type Engine interface {
-	// Recognize returns (nil, nil) when no song matches.
-	Recognize(ctx context.Context, a *audio.AudioData) (*matcher.MatchResult, error)
-	FingerprintSong(songID int, a *audio.AudioData) ([]fingerprint.Fingerprint, error)
+func Fingerprint(x []float32) []fingerprint.Fingerprint {
+	spec := fft.Spectrogram(x, WindowSize, Hop)
+	return fingerprint.Generate(peaks.Find(spec, PeakDT, PeakDF, RangeDB))
 }
 
-// DefaultEngine: decode -> resample -> STFT -> peaks -> hashes -> vote.
-type DefaultEngine struct {
-	store matcher.FingerprintStore
-}
-
-// NewEngine builds an engine over a fingerprint store.
-func NewEngine(store matcher.FingerprintStore) *DefaultEngine {
-	return &DefaultEngine{store: store}
-}
-
-func fingerprintAudio(a *audio.AudioData, songID int) ([]fingerprint.Fingerprint, error) {
-	if a == nil {
-		return nil, ErrTooShort
+func Recognize(ctx context.Context, st metadata.Store, x []float32) (matcher.Result, int, error) {
+	fps := Fingerprint(x)
+	seen := map[uint32]bool{}
+	var hashes []uint32
+	for _, f := range fps {
+		if !seen[f.Hash] {
+			seen[f.Hash] = true
+			hashes = append(hashes, f.Hash)
+		}
 	}
-	samples := audio.Resample(a.Samples, a.SampleRate, fft.TargetSampleRate)
-	if len(samples) < fft.WindowSize {
-		return nil, ErrTooShort
-	}
-	spec := fft.ComputeSTFT(samples, fft.TargetSampleRate, fft.WindowSize, fft.HopSize)
-	pk := peaks.ExtractPeaks(spec, peaks.DefaultThresholdDB)
-	return fingerprint.GenerateFingerprints(pk, songID), nil
-}
-
-// FingerprintSong fingerprints a full track for the catalog.
-func (e *DefaultEngine) FingerprintSong(songID int, a *audio.AudioData) ([]fingerprint.Fingerprint, error) {
-	return fingerprintAudio(a, songID)
-}
-
-// Recognize fingerprints the clip and votes against the store.
-func (e *DefaultEngine) Recognize(ctx context.Context, a *audio.AudioData) (*matcher.MatchResult, error) {
-	fps, err := fingerprintAudio(a, 0)
+	hits, err := st.Lookup(ctx, hashes)
 	if err != nil {
-		return nil, err
+		return matcher.Result{}, len(fps), err
 	}
-	return matcher.MatchQuery(ctx, fps, e.store)
+	return matcher.Match(fps, hits), len(fps), nil
 }

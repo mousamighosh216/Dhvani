@@ -1,27 +1,112 @@
-import { useState } from 'react'
-import ChatWindow from './components/ChatWindow.jsx'
-import AddSongPanel from './components/AddSongPanel.jsx'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { Icon, Wordmark } from './ui.jsx'
+import { AuthProvider, LibraryProvider, UICtx, go, useAuth, useRoute } from './store.jsx'
+import { SearchModal, SongModal } from './SearchModal.jsx'
+import AuthPage from './pages/AuthPage.jsx'
+import Home from './pages/Home.jsx'
+import Explore from './pages/Explore.jsx'
+import Library from './pages/Library.jsx'
+import History from './pages/History.jsx'
+import Saved from './pages/Saved.jsx'
+import Profile from './pages/Profile.jsx'
 
-export default function App() {
-  const [panelOpen, setPanelOpen] = useState(false)
+function Splash() {
   return (
-    <div className={`app ${panelOpen ? 'with-panel' : ''}`}>
-      <header className="topbar">
-        <div className="brand">
-          <svg viewBox="0 0 32 32" width="26" height="26" aria-hidden="true">
-            <rect width="32" height="32" rx="8" fill="var(--accent)" />
-            <path d="M7 16h2M12 11v10M17 7v18M22 12v8M26 15v2" stroke="#062b27" strokeWidth="2.4" strokeLinecap="round" />
-          </svg>
-          <span>Dhwani</span>
-        </div>
-        <button type="button" className="ghost" onClick={() => setPanelOpen((o) => !o)}>
-          {panelOpen ? 'Hide catalog' : 'Catalog'}
-        </button>
-      </header>
-      <main>
-        <ChatWindow />
-        {panelOpen && <AddSongPanel onClose={() => setPanelOpen(false)} />}
-      </main>
+    <div className="splash">
+      <div className="dust" aria-hidden="true">{Array.from({ length: 14 }, (_, i) => <i key={i} style={{ left: `${(i * 37) % 100}%`, top: `${(i * 53) % 100}%`, animationDelay: `${i * 0.3}s` }} />)}</div>
+      <Wordmark height={150} animate />
+      <p className="tag">Finding the identity behind the sound.</p>
+      <p className="ready">ALMOST READY</p>
+      <div className="loadbar"><i /></div>
     </div>
   )
+}
+
+const MENU = [['Home', '/'], ['Explore', '/explore'], ['History', '/history'], ['Library', '/library'], ['Saved Matches', '/saved']]
+const NAV = [['Discover', '/'], ['Explore', '/explore'], ['Library', '/library']]
+
+function Header({ path, onSearch }) {
+  const { user, logout } = useAuth()
+  const [open, setOpen] = useState(false)
+  const box = useRef(null)
+  useEffect(() => { setOpen(false) }, [path])
+  useEffect(() => {
+    const h = (e) => box.current && !box.current.contains(e.target) && setOpen(false)
+    document.addEventListener('mousedown', h)
+    return () => document.removeEventListener('mousedown', h)
+  }, [])
+  const active = (p) => (p === '/' ? path === '/' || path === '/identify' : path === p)
+  return (
+    <header className="top">
+      <div className="wrap bar">
+        <div className="menu-box" ref={box}>
+          <button className="icon-btn menu-btn" onClick={() => setOpen(!open)} aria-label="Menu" aria-expanded={open}><Icon name="menu" size={24} /></button>
+          {open && (
+            <nav className="menu" aria-label="Navigate">
+              <h6>NAVIGATE</h6>
+              {MENU.map(([label, p]) => (
+                <a key={p} href={'#' + p} className={active(p) ? 'on' : ''}><i />{label}</a>
+              ))}
+              <hr />
+              <a href="#/profile" className={path === '/profile' ? 'on' : ''}><Icon name="user" size={16} /> View Profile</a>
+              <button onClick={logout}>Sign out</button>
+            </nav>
+          )}
+        </div>
+        <a href="#/" className="brand" aria-label="Dhvani home"><Wordmark height={22} /></a>
+        <nav className="links">{NAV.map(([label, p]) => <a key={p} href={'#' + p} className={active(p) ? 'on' : ''}>{label}</a>)}</nav>
+        <div className="right">
+          <button className="icon-btn" onClick={onSearch} aria-label="Search"><Icon name="search" size={20} /></button>
+          <a href="#/profile" className="avatar" aria-label="Profile">{(user?.name || '?').charAt(0).toUpperCase()}</a>
+        </div>
+      </div>
+    </header>
+  )
+}
+
+function Layout() {
+  const path = useRoute()
+  const [search, setSearch] = useState(false)
+  const [song, setSong] = useState(null)
+  const ui = { openSearch: useCallback(() => setSearch(true), []), openSong: useCallback((s) => setSong(s), []) }
+
+  useEffect(() => { if (path !== '/identify') window.scrollTo(0, 0) }, [path])
+  useEffect(() => {
+    const h = (e) => {
+      const typing = /input|textarea|select/i.test(e.target.tagName)
+      if ((e.key === '/' && !typing) || ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k')) { e.preventDefault(); setSearch(true) }
+    }
+    window.addEventListener('keydown', h)
+    return () => window.removeEventListener('keydown', h)
+  }, [])
+
+  const page = { '/': <Home />, '/identify': <Home scrollToIdentify />, '/explore': <Explore />, '/library': <Library />,
+    '/history': <History />, '/saved': <Saved />, '/profile': <Profile /> }[path] || <Home />
+  return (
+    <UICtx.Provider value={ui}>
+      <Header path={path} onSearch={ui.openSearch} />
+      <main>{page}</main>
+      <footer className="foot"><div className="wrap">Dhvani · Audio fingerprinting</div></footer>
+      {search && <SearchModal onClose={() => setSearch(false)} />}
+      {song && <SongModal song={song} onClose={() => setSong(null)} />}
+    </UICtx.Provider>
+  )
+}
+
+function Shell() {
+  const { user, ready } = useAuth()
+  const [splash, setSplash] = useState(() => { try { return !sessionStorage.getItem('dhvani_seen') } catch { return true } })
+  useEffect(() => {
+    if (!splash) return
+    const t = setTimeout(() => { setSplash(false); try { sessionStorage.setItem('dhvani_seen', '1') } catch {} }, 2400)
+    return () => clearTimeout(t)
+  }, [splash])
+  if (splash) return <Splash />
+  if (!ready) return <div className="boot" />
+  if (!user) return <AuthPage />
+  return <LibraryProvider><Layout /></LibraryProvider>
+}
+
+export default function App() {
+  return <AuthProvider><Shell /></AuthProvider>
 }
