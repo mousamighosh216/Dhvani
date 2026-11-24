@@ -1,281 +1,74 @@
-# Dhvani 🎵 — Music Recognition & Discovery Platform
+# Dhvani
 
-**Dhvani** is a high-performance music recognition and discovery platform powered by classical Digital Signal Processing (DSP) audio fingerprinting and time-offset voting. Built with a modular **Go** backend monolith and a modern **React** chat interface, Dhumani transforms raw audio recordings into identified songs and rich music recommendations.
+Identifies songs from short audio clips (STFT → spectral peaks → anchor/target hashes → offset voting).
+Go API + PostgreSQL + React/Vite frontend in the Dhvani mint/teal design (Manrope + Inter).
 
----
-
-## 🚀 Key Features
-
-* **Classical Audio Fingerprinting (Phase 1)**: Robust song identification using FFT, STFT, spectral peak detection, anchor-target pairing, and temporal offset voting.
-* **Noise-Resistant Identification**: High accuracy even in the presence of background noise, volume fluctuations, and microphone coloration.
-* **Conversational Chat Interface**: ChatGPT-style React UI with Web Audio API recording, drag-and-drop file uploading, and real-time waveforms.
-* **Content-Based Recommendations (Phase 2)**: Acoustic feature extraction (BPM, MFCCs, Chroma) to suggest musically similar tracks.
-* **Modular Monolith Architecture**: Decoupled Go packages ensuring parallel development between algorithm (Developer A) and product (Developer B) layers.
-
----
-
-## 📂 Project Directory Structure
+## Layout
 
 ```text
-dhvani/
-├── README.md
-├── docker-compose.yml
-├── docs/
-│   ├── system-design.md
-│   └── api-spec.md
-├── database/
-│   └── migrations/
-│       └── 001_initial_schema.sql
-├── frontend/                         
-│   ├── public/
-│   └── src/
-│       ├── components/               # Chat UI, Audio Recorder, Song Cards
-│       ├── hooks/                    # Web Audio API hooks
-│       ├── services/                 # API client
-│       └── App.jsx
-└── backend/                          # Go Monolith
-    ├── go.mod
-    ├── go.sum
-    ├── main.go
-    ├── api/                          # Developer B (HTTP Router & Handlers)
-    │   ├── router.go
-    │   └── recognition_handler.go
-    ├── metadata/                     # Developer B (DB Persistence & Models)
-    │   ├── postgres.go
-    │   └── song_service.go
-    └── recognition/                 
-        ├── audio/                    # WAV/PCM decoding & normalization
-        │   └── decoder.go
-        ├── fft/                      # STFT & Spectrogram computation
-        ├── peaks/                    # 2D Spectral peak extraction
-        ├── fingerprint/              # Anchor-target peak pairing & hashing
-        └── matcher/                  # Index retrieval & time-offset voting
-```
----
-
-## 📐 System Architecture & Diagrams
-### 1. System Architecture
-Dhumani separates client interaction, API orchestration, core signal processing, and database indexing into clean layers:
-
-```text
-+-------------------------------------------------------------------------------+
-|                             CLIENT / FRONTEND                                 |
-|  React Web App (Chat UI, Mic Recorder, Audio Player, Upload UI)               |
-+-------------------------------------------------------------------------------+
-                                      |
-                           HTTP / REST API (JSON / FormData)
-                                      v
-+-------------------------------------------------------------------------------+
-|                            GO BACKEND MONOLITH                                |
-|                                                                               |
-|  +-------------------------------------------------------------------------+  |
-|  |                         API Gateway / HTTP Router                       |  |
-|  +-------------------------------------------------------------------------+  |
-|                          |                            |                       |
-|                          v                            v                       |
-|  +-------------------------------+    +------------------------------------+  |
-|  |    Application & Meta Module   |    |         Recognition Core           |  |
-|  |         (Developer B)         |    |           (Developer A)            |  |
-|  |  - Song / Metadata Services   |    |  - Audio Decoder / Preprocessor    |  |
-|  |  - History & Saved Songs      |    |  - DSP Pipeline (FFT/STFT)          |  |
-|  |  - Recommendation Engine (P2) |    |  - Peak Detector & Fingerprinter   |  |
-|  |  - External Link Resolver     |    |  - Time-Offset Matcher             |  |
-|  +-------------------------------+    +------------------------------------+  |
-|                  |                                      |                     |
-+------------------|--------------------------------------|---------------------+
-                   |                                      |
-                   v                                      v
-+-------------------------------------------------------------------------------+
-|                               PERSISTENCE LAYER                               |
-|                                                                               |
-|  PostgreSQL Database                                                          |
-|   ├── Metadata Store: songs, artists, albums, history, user_saved              |
-|   └── Recognition Index: fingerprints (hash -> song_id, offset)              |
-|                                                                               |
-|  Local Filesystem / Object Storage                                            |
-|   └── Audio Files (.mp3 / .wav source files)                                  |
-+-------------------------------------------------------------------------------+
-```
-### 2. Class / Component Diagram (Go Interfaces)
-The interface contract decouples the backend development:
-
-```text
-+------------------------------------------------------------------------------------+
-|                                package: recognition                                |
-|                                   (Developer A)                                    |
-+------------------------------------------------------------------------------------+
-|  <<interface>>                                                                     |
-|  Engine                                                                            |
-|  + Recognize(pcmData []byte) (*MatchResult, error)                                 |
-|  + FingerprintSong(songID int, pcmData []byte) ([]Fingerprint, error)             |
-+------------------------------------------------------------------------------------+
-                                         ^
-                                         | implements
-+------------------------------------------------------------------------------------+
-|  DefaultEngine                                                                     |
-+------------------------------------------------------------------------------------+
-|  - preprocessor : AudioPreprocessor                                                |
-|  - stft         : STFTAnalyzer                                                     |
-|  - peakDetector : PeakDetector                                                     |
-|  - fingerprinter: FingerprintGenerator                                             |
-|  - store        : FingerprintStore                                                 |
-+------------------------------------------------------------------------------------+
-|  + Recognize(pcmData []byte) (*MatchResult, error)                                 |
-|  + FingerprintSong(songID int, pcmData []byte) ([]Fingerprint, error)             |
-+------------------------------------------------------------------------------------+
-       |                  |                  |                  |
-       v                  v                  v                  v
-+--------------+   +--------------+   +--------------+   +-------------------+
-| AudioPreproc |   | STFTAnalyzer |   | PeakDetector |   | FingerprintGen    |
-+--------------+   +--------------+   +--------------+   +-------------------+
-| + ToMono()   |   | + Compute()  |   | + FindPeaks()|   | + PairPeaks()     |
-| + Resample() |   |   ->Spectro  |   |   ->Landmarks|   | + HashTuples()    |
-+--------------+   +--------------+   +--------------+   +-------------------+
-
-                                         | uses
-                                         v
-                      +-------------------------------------+
-                      |       <<interface>>                 |
-                      |       FingerprintStore              |
-                      +-------------------------------------+
-                      | + QueryHashes(hashes []uint32)      |
-                      |   -> []DBMatch                      |
-                      | + SaveFingerprints(fps []Fingerprint|
-                      +-------------------------------------+
-                                         ^
-                                         | implements
-                                         |
-+------------------------------------------------------------------------------------+
-|                                 package: metadata                                  |
-|                                   (Developer B)                                    |
-+------------------------------------------------------------------------------------+
-|  PostgresStore                                                                     |
-+------------------------------------------------------------------------------------+
-|  - db : *sql.DB                                                                    |
-+------------------------------------------------------------------------------------+
-|  + QueryHashes(hashes []uint32) ([]DBMatch, error)                                 |
-|  + GetSongMetadata(songID int) (*SongMetadata, error)                              |
-+------------------------------------------------------------------------------------+
+database/migrations/001_initial_schema.sql              your schema (artists, users, updates, songs, fingerprints)
+database/migrations/002_accounts_history_collections.sql  password_hash, recognition_history, collections, collection_songs
+database/migrations/003_fingerprint_offsets.sql          repairs legacy fingerprint schemas
+docker-compose.yml                                      Postgres 16; applies migrations on first start
+backend/    main.go · auth/ · api/ · metadata/ · recognition/
+frontend/   src/App.jsx · pages/ (Home, Explore, Library, History, Saved, Profile, AuthPage) · ui.jsx · styles.css
 ```
 
-### 3. Entity-Relationship (ER) Diagram
-PostgreSQL schema supporting both rich application metadata and high-speed recognition lookup indexing:
+## Run
 
-```text
-+-------------------+           +-------------------+
-|      ARTISTS      |           |      ALBUMS       |
-+-------------------+           +-------------------+
-| id (PK)           |<----1---N-| id (PK)           |
-| name              |           | artist_id (FK)    |
-| bio               |           | title             |
-+-------------------+           | release_date      |
-          ^                     | cover_art_url     |
-          |                     +-------------------+
-          | 1                             | 1
-          |                               |
-          | N                             | N
-+---------------------------------------------------+
-|                       SONGS                       |
-+---------------------------------------------------+
-| id (PK)                                           |
-| artist_id (FK)                                    |
-| album_id (FK)                                     |
-| title                                             |
-| duration_seconds                                  |
-| source_file_path                                  |
-| external_links (JSONB: Spotify, YouTube, etc.)    |
-| created_at                                        |
-+---------------------------------------------------+
-      | 1                                 | 1
-      |                                   |
-      | N                                 | N
-+-------------------+           +-------------------+
-|    FINGERPRINTS   |           |   SONG_FEATURES   |  <-- Phase 2 Recommendations
-+-------------------+           +-------------------+
-| hash (PK, Index)  |           | song_id (PK, FK)  |
-| song_id (PK, FK)  |           | tempo             |
-| song_offset (PK)  |           | energy            |
-+-------------------+           | spectral_centroid |
-                                | mfcc_vector       |
-                                +-------------------+
-```
-## 📡 REST API Specifications
-### POST /api/v1/recognize
-Submits an audio sample (file upload or microphone blob) for identification.
-* Content-Type: multipart/form-dataForm 
-* Field: audio (file, required)
-Sample Response (200 OK - Match Found):
+Needs Go ≥ 1.24, Node ≥ 18, ffmpeg and PostgreSQL (or Docker).
 
-```Bash
-{
-  "status": "success",
-  "data": {
-    "matched": true,
-    "confidence": 0.94,
-    "match_offset_seconds": 42.5,
-    "song": {
-      "id": 101,
-      "title": "Midnight City",
-      "duration_seconds": 243,
-      "artist": { "id": 12, "name": "M83" },
-      "album": {
-        "id": 45,
-        "title": "Hurry Up, We're Dreaming",
-        "cover_art_url": "[https://cdn.example.com/covers/45.jpg](https://cdn.example.com/covers/45.jpg)",
-        "release_date": "2011-10-18"
-      },
-      "external_links": {
-        "spotify": "[https://open.spotify.com/track/6RUK21P2P03xD3399TF3Oj](https://open.spotify.com/track/6RUK21P2P03xD3399TF3Oj)",
-        "youtube": "[https://www.youtube.com/watch?v=dX3k_QDnzHE](https://www.youtube.com/watch?v=dX3k_QDnzHE)"
-      }
-    }
-  }
-}
-```
-### POST /api/v1/songs
-Ingests a new audio track into the catalog and extracts audio fingerprints.  
-
-### GET /api/v1/songs/:id/recommendations
-Returns musically similar tracks based on acoustic feature vector similarity.  
-
-## 🔬 Mathematical Implementation Overview
-The DSP pipeline follows a 5-step classical recognition workflow:  
-```math
-Audio Decoding & Normalization: Stereo channels are averaged to mono $S_{\text{mono}} = \frac{C_L + C_R}{2}$ and scaled into floating-point range $[-1.0, 1.0]$.
-Short-Time Fourier Transform (STFT): Audio is split into overlapping windows ($N=2048$, $50\%$ overlap). FFT converts each time frame into frequency magnitude spectrums to build a 2D Spectrogram[cite: 1].
-Spectral Peak Detection: Strong local maxima landmarks are extracted across time-frequency bins[cite: 1].
-Anchor-Target Pairing & Hashing: Landmark pairs within a constrained bounding box are packed into compact 32-bit hashes:$$\text{Hash} = (f_1 \ll 16) \mid (f_2 \ll 8) \mid \Delta t$$
-Time-Offset Voting: Matches are evaluated by temporal offset alignment:$$\text{Offset} = t_{\text{database}} - t_{\text{query}}$$
-Candidate tracks are ranked by the density of their largest offset cluster[cite: 1].
+```bash
+docker compose up -d
+export DATABASE_URL='postgres://postgres:postgres@localhost:5432/dhwani?sslmode=disable'
+export JWT_SECRET='<16+ random characters>'     # if unset, a random key is used and sign-ins end on restart
+cd backend && go mod tidy && go run .            # API on :8080  (no DATABASE_URL → in-memory store)
+cd frontend && npm install && npm run dev        # UI on http://localhost:5173 (proxies /api to :8080)
 ```
 
-## 🛠️ Getting Started
+For an existing database, apply new migrations manually; Docker only runs init scripts when its data volume is first created:
 
-Prerequisites
-* Go (v1.22 or higher)
-* Node.js (v18 or higher)
-* PostgreSQL (v15 or higher)
+```bash
+docker compose exec -T db psql -U postgres -d dhwani -f /docker-entrypoint-initdb.d/003_fingerprint_offsets.sql
+# Or, with psql installed locally:
+psql "$DATABASE_URL" -f database/migrations/003_fingerprint_offsets.sql
+```
 
-Installation & Run
-* Clone Repository:
-```Bash
- git clone [https://github.com/mousamighosh216/dhvani.git](https://github.com/mousamighosh216/dhvani.git)
-cd dhvani
-```
-Database Setup:
-```Bash
-psql -U postgres -d dhumani -f database/migrations/001_initial_schema.sql
-```
-Backend Setup:
-```Bash 
-cd backend
-go mod download
-go run main.go
-```
-Frontend Setup:
-```Bash
-cd ../frontend
-npm install
-npm run dev
-```
----
+If the migration finds fingerprint rows without stored offsets, it clears those rows but keeps song metadata. Re-upload those songs to rebuild their fingerprints and restore identification.
+
+After the splash screen, identify clips and browse the catalog without signing in. Sign in to save songs or view personal history; create an account or sign in to upload a song with its details.
+Microphone recording needs `localhost` or HTTPS.
+
+## Screens
+
+Splash · Home (identify by microphone or upload, results with
+other likely matches) · Search (`/` or ⌘K) · Explore (genres, search) · Library · History · Saved Matches
+(collections) · My Account · Sign in / Create account · Upload a Song.
+
+## API
+
+JSON responses: `{"status":"success","data":…}` / `{"status":"error","message":…}`. Personal data and
+song uploads need `Authorization: Bearer <token>`. Recognition and read-only catalog endpoints are public.
+
+| Endpoint | Purpose |
+|---|---|
+| `POST /api/v1/auth/register`, `/auth/login` | `{name,email,password}` / `{email,password}` → `{token,user}` |
+| `GET /api/v1/me`, `PATCH /api/v1/me` | profile + stats; rename |
+| `POST /api/v1/recognize` | Public multipart `audio` → match, confidence, offset, others; records history when signed in |
+| `GET /api/v1/history` | your identifications, newest first |
+| `GET /api/v1/songs?q=&genre=&sort=recent\|artist\|popular` · `GET /songs/{id}` · `GET /genres` | Public catalog |
+| `POST /api/v1/songs` | multipart `audio`, `title`, `artist`, `genre`, `cover_image_url` (records a row in `updates`) |
+| `GET/POST /api/v1/collections` · `GET /collections/{id\|all}/songs` · `PUT/DELETE /collections/{id}/songs/{songId}` | saved matches |
+
+## Decisions and deviations
+
+- `user` → `users` (reserved word in PostgreSQL). `fingerprints` is `(song_id, hash, offset_frames)` with a non-unique, indexed `hash`.
+- Passwords use PBKDF2-SHA256 (standard library) and tokens are HS256 JWTs, so there are no extra Go dependencies beyond pgx.
+- The design's album, release year and "Open in music app" are not in the schema, so they are omitted. There is no audio preview, so no play buttons.
+- "Free Plan 17/30" is display-only: the API does not limit identifications.
+- Saved Matches = songs in any of your collections; the heart saves to **Favourites**. "Identified This Week" is computed from history.
+- No rate limiting on login yet.
+
+## Tests
+
+`cd backend && go test ./...` — engine on synthetic songs: correct offset, 10 dB / 5 dB noise, unknown song, noise only.

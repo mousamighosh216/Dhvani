@@ -1,4 +1,7 @@
+node_modules/
+frontend/dist/
+samples/
+dhwani-server
+*.log
 .env
-**/testsamples
-**/spectrogramsamples
-phase.md
+.env.local

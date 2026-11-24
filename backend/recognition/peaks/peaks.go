@@ -1,78 +1,62 @@
+// Package peaks picks 2D local maxima from a dB spectrogram.
 package peaks
 
-import "Dhvani/recognition/fft"
+type Peak struct{ T, F int }
 
-// strong spectral landmark in the 2d spectrogram
-type Peak struct {
-	TimeFrame int
-	FreqBin   int
-	Magnitude float64
-}
-
-func ExtractPeaks(spec *fft.Spectrogram, neighbourhoodTime int, neighbourhoodFreq int, minMagnitude float64) []Peak {
-	numFrames := len(spec.Magnitudes)
-	if numFrames == 0 {
+// Find returns points that are the maximum of their (2*dT+1) x (2*dF+1) neighbourhood
+// and within rangeDB of the loudest point in the spectrogram.
+func Find(spec [][]float32, dT, dF int, rangeDB float32) []Peak {
+	if len(spec) == 0 {
 		return nil
 	}
-	numBins := len(spec.Magnitudes[0])
-	var peaks []Peak
-
-	// iterate through time and freq grid
-	for t := 0; t < numFrames; t++ {
-		for f := 0; f < numBins; f++ {
-			mag := spec.Magnitudes[t][f]
-
-			// background noice skipped
-			if mag < minMagnitude {
-				continue
-			}
-			// check if this point is the absolute min in its 2d neighbour
-			if isLocalMax((*spec).Magnitudes, t, f, neighbourhoodTime, neighbourhoodFreq, numFrames, numBins) {
-				peaks = append(peaks, Peak{
-					TimeFrame: t,
-					FreqBin:   f,
-					Magnitude: mag,
-				})
+	nT, nF := len(spec), len(spec[0])
+	top := spec[0][0]
+	for _, row := range spec {
+		for _, v := range row {
+			if v > top {
+				top = v
 			}
 		}
 	}
-	return peaks
-}
+	floor := top - rangeDB
 
-// isLocalMax checks if the current cell (t, f) is strictly greater than all surrounding neighbors
-func isLocalMax(matrix [][]float64, t int, f int, nTime int, nFreq int, maxT int, maxF int) bool {
-	currentMag := matrix[t][f]
+	// pass 1: max along frequency
+	tmp := make([][]float32, nT)
+	for t := range spec {
+		row := make([]float32, nF)
+		for f := range row {
+			lo, hi := max(0, f-dF), min(nF-1, f+dF)
+			m := spec[t][lo]
+			for k := lo + 1; k <= hi; k++ {
+				if spec[t][k] > m {
+					m = spec[t][k]
+				}
+			}
+			row[f] = m
+		}
+		tmp[t] = row
+	}
 
-	tMin := max(0, t-nTime)
-	tMax := min(maxT-1, t+nTime)
-	fMin := max(0, f-nFreq)
-	fMax := min(maxF-1, f+nFreq)
-
-	for nt := tMin; nt <= tMax; nt++ {
-		for nf := fMin; nf <= fMax; nf++ {
-			// Skip comparing the cell with itself
-			if nt == t && nf == f {
+	// pass 2: max along time; a peak equals its own neighbourhood max
+	var out []Peak
+	for t := 0; t < nT; t++ {
+		lo, hi := max(0, t-dT), min(nT-1, t+dT)
+		for f := 1; f < nF; f++ { // skip DC
+			v := spec[t][f]
+			if v < floor || v != tmp[t][f] {
 				continue
 			}
-			if matrix[nt][nf] >= currentMag {
-				return false
+			isMax := true
+			for k := lo; k <= hi; k++ {
+				if tmp[k][f] > v {
+					isMax = false
+					break
+				}
+			}
+			if isMax {
+				out = append(out, Peak{T: t, F: f})
 			}
 		}
 	}
-
-	return true
-}
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
+	return out
 }

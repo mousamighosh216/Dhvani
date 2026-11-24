@@ -1,73 +1,47 @@
+// Package fingerprint pairs anchor and target peaks into 32-bit hashes.
 package fingerprint
 
-import "Dhvani/recognition/peaks"
+import (
+	"sort"
 
-// Fingerprint holds the generated hash, song identifier, and absolute timestamp offset
+	"dhwani/recognition/peaks"
+)
+
+const (
+	MaxDT  = 96 // max frames between anchor and target
+	FanOut = 10 // targets per anchor
+)
+
 type Fingerprint struct {
-	Hash         uint32 // Packed (f1, f2, delta_t) hash key
-	SongID       int    // Associated song ID in database
-	AbsoluteTime uint32 // Frame index t1 where the anchor peak occurred
+	Hash uint32 // f1 (10 bits) | f2 (10 bits) | dt (12 bits)
+	T    int    // anchor frame
 }
 
-// TargetZone defines the search bounding box relative to an anchor peak
-type TargetZone struct {
-	MinDeltaTime int // Minimum time frame offset ahead (e.g., 5 frames)
-	MaxDeltaTime int // Maximum time frame offset ahead (e.g., 65 frames ~1.5s)
-	MinFreqDiff  int // Freq bin lower bound shift
-	MaxFreqDiff  int // Freq bin upper bound shift
+func Pack(f1, f2, dt int) uint32 {
+	return uint32(f1&0x3FF)<<22 | uint32(f2&0x3FF)<<12 | uint32(dt&0xFFF)
 }
 
-// DefaultTargetZone creates a standard Shazam-style target search box
-func DefaultTargetZone() TargetZone {
-	return TargetZone{
-		MinDeltaTime: 3,  // Start searching 3 frames ahead
-		MaxDeltaTime: 50, // Search up to 50 frames (~1.1 seconds) ahead
-		MinFreqDiff:  -30,
-		MaxFreqDiff:  30,
-	}
-}
-
-// iterates over extracted peaks and pairs anchor peaks with target peaks
-func GenerateFingerprints(peakList []peaks.Peak, songID int, zone TargetZone) []Fingerprint {
-	numPeaks := len(peakList)
-	var fingerprints []Fingerprint
-
-	// Iterate over each peak as a potential Anchor Peak
-	for i := 0; i < numPeaks; i++ {
-		anchor := peakList[i]
-
-		// Search subsequent peaks as potential Target Peaks
-		for j := i + 1; j < numPeaks; j++ {
-			target := peakList[j]
-
-			deltaTime := target.TimeFrame - anchor.TimeFrame
-
-			// If target peak is beyond the maximum time range, break early
-			if deltaTime > zone.MaxDeltaTime {
+func Generate(ps []peaks.Peak) []Fingerprint {
+	sort.Slice(ps, func(i, j int) bool {
+		if ps[i].T != ps[j].T {
+			return ps[i].T < ps[j].T
+		}
+		return ps[i].F < ps[j].F
+	})
+	var out []Fingerprint
+	for i, a := range ps {
+		n := 0
+		for j := i + 1; j < len(ps) && n < FanOut; j++ {
+			dt := ps[j].T - a.T
+			if dt > MaxDT {
 				break
 			}
-
-			// Check if target peak falls within the target zone criteria
-			if deltaTime >= zone.MinDeltaTime {
-				freqDiff := target.FreqBin - anchor.FreqBin
-				if freqDiff >= zone.MinFreqDiff && freqDiff <= zone.MaxFreqDiff {
-					// Quantize values to fit bit allocation
-					f1 := uint32(anchor.FreqBin & 0xFFFF) // 16 bits
-					f2 := uint32(target.FreqBin & 0xFF)   // 8 bits
-					dt := uint32(deltaTime & 0xFF)        // 8 bits
-
-					// Pack into 32-bit Hash: (f1 << 16) | (f2 << 8) | dt
-					hash := (f1 << 16) | (f2 << 8) | dt
-
-					fingerprints = append(fingerprints, Fingerprint{
-						Hash:         hash,
-						SongID:       songID,
-						AbsoluteTime: uint32(anchor.TimeFrame),
-					})
-				}
+			if dt < 1 {
+				continue
 			}
+			out = append(out, Fingerprint{Hash: Pack(a.F, ps[j].F, dt), T: a.T})
+			n++
 		}
 	}
-
-	return fingerprints
+	return out
 }
