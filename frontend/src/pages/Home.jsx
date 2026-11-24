@@ -7,12 +7,13 @@ import { go, useAuth, useLibrary, useUI } from '../store.jsx'
 function Carousel() {
   const { openSong } = useUI()
   const { isSaved, toggleSave } = useLibrary()
+  const { user } = useAuth()
   const [songs, setSongs] = useState(null)
   const [i, setI] = useState(0)
   useEffect(() => { api.getSongs({ sort: 'popular', limit: 7 }).then(setSongs).catch(() => setSongs([])) }, [])
 
   if (songs && songs.length === 0) {
-    return <div className="carousel"><div className="slide pos0 empty-card"><Icon name="music" size={34} /><strong>Your catalog is empty</strong><p>Add a song in your <a href="#/library">Library</a> to see it here.</p></div></div>
+    return <div className="carousel"><div className="slide pos0 empty-card"><Icon name="music" size={34} /><strong>Your catalog is empty</strong><p>Be the first to <a href={user ? '#/upload' : '#/auth?next=/upload'}>add a song</a>.</p></div></div>
   }
   if (!songs) return <div className="carousel" />
   const n = songs.length
@@ -27,7 +28,7 @@ function Carousel() {
               <div className="art">
                 <Cover song={s} size="100%" radius={0} />
                 <span className="pill">{k === 0 ? 'Featured Discovery' : 'Just Identified'}</span>
-                {p === 0 && <button className="heart" onClick={() => toggleSave(s)} aria-label="Save"><Icon name="heart" size={18} fill={isSaved(s.id)} /></button>}
+                {p === 0 && <button className="heart" onClick={() => user ? toggleSave(s) : go('/auth?next=/')} aria-label={user ? 'Save' : 'Sign in to save'}><Icon name="heart" size={18} fill={isSaved(s.id)} /></button>}
               </div>
               <div className="meta">
                 <h4>{s.title}</h4><p>{s.artist}</p>
@@ -71,12 +72,19 @@ function Timeline({ song, offset, clip }) {
 function Results({ r, onReset }) {
   const { isSaved, toggleSave } = useLibrary()
   const { openSong } = useUI()
+  const { user } = useAuth()
   if (!r.matched) {
     return (
       <div className="results">
         <div className="res-head"><div><h2>No match found</h2><p className="muted">We couldn’t find this in the catalog.</p></div>
           <button className="btn ghost" onClick={onReset}><Icon name="back" size={16} /> New Search</button></div>
-        <div className="card pad-lg"><p>Try 8–10 seconds of clear audio with less background noise. If the song isn’t in the catalog yet, you can add it from your <a href="#/library">Library</a>.</p></div>
+        <div className="card pad-lg">
+          <p>Try 8–10 seconds of clear audio with less background noise. If it’s not in the catalog, help others find it by adding the song.</p>
+          <div className="cta">
+            <a className="btn primary" href={user ? '#/upload' : '#/auth?next=/upload'}>Add this song</a>
+            {!user && <span className="muted small">Sign in or create an account to upload.</span>}
+          </div>
+        </div>
       </div>
     )
   }
@@ -99,7 +107,7 @@ function Results({ r, onReset }) {
         </div>
         <Timeline song={s} offset={r.match_offset_seconds} clip={r.clip_seconds} />
         <div className="tm-actions">
-          <button className={'btn soft' + (saved ? ' on' : '')} onClick={() => toggleSave(s)}><Icon name="heart" size={16} fill={saved} /> {saved ? 'Saved' : 'Save'}</button>
+          <button className={'btn soft' + (saved ? ' on' : '')} onClick={() => user ? toggleSave(s) : go('/auth?next=/')}><Icon name="heart" size={16} fill={saved} /> {user ? (saved ? 'Saved' : 'Save') : 'Sign in to save'}</button>
           <button className="btn soft" onClick={() => openSong(s)}>View song</button>
         </div>
       </div>
@@ -204,6 +212,7 @@ function Identify() {
 }
 
 export default function Home({ scrollToIdentify }) {
+  const { user } = useAuth()
   const ref = useRef(null)
   useEffect(() => { if (scrollToIdentify) ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }, [scrollToIdentify])
   return (
@@ -218,6 +227,7 @@ export default function Home({ scrollToIdentify }) {
             <div className="cta">
               <button className="btn primary" onClick={() => ref.current?.scrollIntoView({ behavior: 'smooth' })}>Identify a Song</button>
               <button className="btn ghost" onClick={() => go('/explore')}>Explore Music</button>
+              <a className="btn ghost" href={user ? '#/upload' : '#/auth?next=/upload'}>Upload a Song</a>
             </div>
             <div className="tech"><MiniWave seed={4} n={12} className="big" /><span className="muted small">Audio fingerprinting technology</span></div>
           </div>

@@ -7,11 +7,18 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/joho/godotenv"
+
 	"dhwani/api"
 	"dhwani/metadata"
 )
 
 func main() {
+	err := godotenv.Load()
+	if err != nil {
+		log.Println("No .env file found")
+	}
+
 	var st metadata.Store
 	if url := os.Getenv("DATABASE_URL"); url != "" {
 		pg, err := metadata.NewPostgres(context.Background(), url)

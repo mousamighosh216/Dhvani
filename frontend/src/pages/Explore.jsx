@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import * as api from '../api.js'
 import { Cover, Crumbs, Empty, Icon, compact, dur } from '../ui.jsx'
-import { go, useLibrary, useUI } from '../store.jsx'
+import { go, useAuth, useLibrary, useUI } from '../store.jsx'
 
 const EMOJI = [['hip', '🎧'], ['indie', '🌿'], ['pop', '🎤'], ['electr', '🎛️'], ['r&b', '🎸'], ['soul', '🎸'], ['jazz', '🎷'], ['classic', '🎻'], ['lo-fi', '☁️'], ['lofi', '☁️'], ['rock', '🤘'], ['synth', '🎹'], ['dance', '🪩']]
 const emoji = (g) => (EMOJI.find(([k]) => g.toLowerCase().includes(k)) || [0, '🎵'])[1]
@@ -22,6 +22,7 @@ export function SongRow({ song, right }) {
 }
 
 export default function Explore() {
+  const { user } = useAuth()
   const [q, setQ] = useState('')
   const [genre, setGenre] = useState('')
   const [genres, setGenres] = useState([])
@@ -66,7 +67,7 @@ export default function Explore() {
         )}
         <h5 className="sect gap">{title}</h5>
         {songs === null ? <p className="muted">Loading…</p> : songs.length === 0
-          ? <Empty title="No songs found">Try a different search, or add songs in your Library.</Empty>
+          ? <Empty title="No songs found">Try a different search, or <a href={user ? '#/upload' : '#/auth?next=/upload'}>upload a song</a>.</Empty>
           : <ul className="card list">{songs.map((s) => <SongRow key={s.id} song={s} />)}</ul>}
       </div>
     </>

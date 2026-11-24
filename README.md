@@ -8,7 +8,8 @@ Go API + PostgreSQL + React/Vite frontend in the Dhvani mint/teal design (Manrop
 ```text
 database/migrations/001_initial_schema.sql              your schema (artists, users, updates, songs, fingerprints)
 database/migrations/002_accounts_history_collections.sql  password_hash, recognition_history, collections, collection_songs
-docker-compose.yml                                      Postgres 16; applies both migrations on first start
+database/migrations/003_fingerprint_offsets.sql          repairs legacy fingerprint schemas
+docker-compose.yml                                      Postgres 16; applies migrations on first start
 backend/    main.go · auth/ · api/ · metadata/ · recognition/
 frontend/   src/App.jsx · pages/ (Home, Explore, Library, History, Saved, Profile, AuthPage) · ui.jsx · styles.css
 ```
@@ -25,27 +26,37 @@ cd backend && go mod tidy && go run .            # API on :8080  (no DATABASE_UR
 cd frontend && npm install && npm run dev        # UI on http://localhost:5173 (proxies /api to :8080)
 ```
 
-Create an account in the UI, add songs under **Library → Grow the catalog**, then identify clips from the home page.
+For an existing database, apply new migrations manually; Docker only runs init scripts when its data volume is first created:
+
+```bash
+docker compose exec -T db psql -U postgres -d dhwani -f /docker-entrypoint-initdb.d/003_fingerprint_offsets.sql
+# Or, with psql installed locally:
+psql "$DATABASE_URL" -f database/migrations/003_fingerprint_offsets.sql
+```
+
+If the migration finds fingerprint rows without stored offsets, it clears those rows but keeps song metadata. Re-upload those songs to rebuild their fingerprints and restore identification.
+
+After the splash screen, identify clips and browse the catalog without signing in. Sign in to save songs or view personal history; create an account or sign in to upload a song with its details.
 Microphone recording needs `localhost` or HTTPS.
 
 ## Screens
 
-Splash · Sign in / Create account · Home (hero carousel, identify by microphone or upload, results with
+Splash · Home (identify by microphone or upload, results with
 other likely matches) · Search (`/` or ⌘K) · Explore (genres, search) · Library · History · Saved Matches
-(collections) · My Account.
+(collections) · My Account · Sign in / Create account · Upload a Song.
 
 ## API
 
-JSON responses: `{"status":"success","data":…}` / `{"status":"error","message":…}`. Everything except
-`/auth/*` and `/healthz` needs `Authorization: Bearer <token>`.
+JSON responses: `{"status":"success","data":…}` / `{"status":"error","message":…}`. Personal data and
+song uploads need `Authorization: Bearer <token>`. Recognition and read-only catalog endpoints are public.
 
 | Endpoint | Purpose |
 |---|---|
 | `POST /api/v1/auth/register`, `/auth/login` | `{name,email,password}` / `{email,password}` → `{token,user}` |
 | `GET /api/v1/me`, `PATCH /api/v1/me` | profile + stats; rename |
-| `POST /api/v1/recognize` | multipart `audio` → match, confidence, offset, others; records history |
+| `POST /api/v1/recognize` | Public multipart `audio` → match, confidence, offset, others; records history when signed in |
 | `GET /api/v1/history` | your identifications, newest first |
-| `GET /api/v1/songs?q=&genre=&sort=recent\|artist\|popular` · `GET /songs/{id}` · `GET /genres` | catalog |
+| `GET /api/v1/songs?q=&genre=&sort=recent\|artist\|popular` · `GET /songs/{id}` · `GET /genres` | Public catalog |
 | `POST /api/v1/songs` | multipart `audio`, `title`, `artist`, `genre`, `cover_image_url` (records a row in `updates`) |
 | `GET/POST /api/v1/collections` · `GET /collections/{id\|all}/songs` · `PUT/DELETE /collections/{id}/songs/{songId}` | saved matches |
 

@@ -39,7 +39,6 @@ export function AuthProvider({ children }) {
     api.setToken(d.token)
     setUser(d.user)
     await refreshMe().catch(() => {})
-    go('/')
   }, [refreshMe])
 
   const value = useMemo(() => ({
@@ -55,7 +54,7 @@ const LibCtx = createContext(null)
 export const useLibrary = () => useContext(LibCtx)
 
 export function LibraryProvider({ children }) {
-  const { refreshMe } = useAuth()
+  const { refreshMe, user } = useAuth()
   const [collections, setCollections] = useState([])
   const [favIds, setFavIds] = useState(new Set())
   const fav = collections.find((c) => c.name === 'Favourites')
@@ -66,7 +65,10 @@ export function LibraryProvider({ children }) {
     const f = cols.find((c) => c.name === 'Favourites')
     setFavIds(new Set(f ? (await api.getCollectionSongs(f.id)).map((s) => s.song.id) : []))
   }, [])
-  useEffect(() => { reload().catch(() => {}) }, [reload])
+  useEffect(() => {
+    if (user) reload().catch(() => {})
+    else { setCollections([]); setFavIds(new Set()) }
+  }, [reload, user])
 
   const toggleSave = useCallback(async (song) => {
     if (!fav) return

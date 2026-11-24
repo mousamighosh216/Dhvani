@@ -60,12 +60,34 @@ func (p *Postgres) AddSong(ctx context.Context, userID int, s Song, fps []finger
 	}
 	err = tx.QueryRow(ctx,
 		`INSERT INTO songs (title, artist_id, genre, cover_image_url, duration)
-		 VALUES ($1, $2, NULLIF($3,''), NULLIF($4,''), $5) RETURNING id`,
+		 VALUES ($1, $2, NULLIF($3,''), NULLIF($4,''), $5)
+		 ON CONFLICT (title, artist_id) DO NOTHING RETURNING id`,
 		s.Title, artistID, s.Genre, s.CoverImageURL, s.Duration).Scan(&s.ID)
-	if err != nil {
-		if pgCode(err, "23505") {
+	if errors.Is(err, pgx.ErrNoRows) {
+		err = tx.QueryRow(ctx,
+			`SELECT id FROM songs WHERE title = $1 AND artist_id = $2 FOR UPDATE`,
+			s.Title, artistID).Scan(&s.ID)
+		if err != nil {
+			return s, 0, err
+		}
+		var hasFingerprints bool
+		if err := tx.QueryRow(ctx,
+			`SELECT EXISTS (SELECT 1 FROM fingerprints WHERE song_id = $1)`, s.ID).Scan(&hasFingerprints); err != nil {
+			return s, 0, err
+		}
+		if hasFingerprints {
 			return s, 0, ErrDuplicate
 		}
+		if _, err := tx.Exec(ctx,
+			`UPDATE songs
+			 SET genre = COALESCE(NULLIF($1,''), genre),
+			     cover_image_url = COALESCE(NULLIF($2,''), cover_image_url),
+			     duration = $3
+			 WHERE id = $4`,
+			s.Genre, s.CoverImageURL, s.Duration, s.ID); err != nil {
+			return s, 0, err
+		}
+	} else if err != nil {
 		return s, 0, err
 	}
 	if userID > 0 {

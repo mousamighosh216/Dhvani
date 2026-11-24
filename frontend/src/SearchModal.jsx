@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import * as api from './api.js'
 import { Cover, Icon, Modal, dur } from './ui.jsx'
-import { go, useLibrary, useUI } from './store.jsx'
+import { go, useAuth, useLibrary, useUI } from './store.jsx'
 
 export function SearchModal({ onClose }) {
   const { openSong } = useUI()
@@ -53,6 +53,7 @@ export function SearchModal({ onClose }) {
 }
 
 export function SongModal({ song, onClose }) {
+  const { user } = useAuth()
   const { isSaved, toggleSave } = useLibrary()
   const saved = isSaved(song.id)
   return (
@@ -63,9 +64,11 @@ export function SongModal({ song, onClose }) {
         <p>{song.artist}</p>
         <p className="muted small">{song.genre ? `${song.genre} · ` : ''}{dur(song.duration_seconds)}</p>
         <div className="row-actions">
-          <button className={'btn ghost' + (saved ? ' on' : '')} onClick={() => toggleSave(song)}>
-            <Icon name="heart" size={16} fill={saved} /> {saved ? 'Saved' : 'Save'}
-          </button>
+          {user
+            ? <button className={'btn ghost' + (saved ? ' on' : '')} onClick={() => toggleSave(song)}>
+              <Icon name="heart" size={16} fill={saved} /> {saved ? 'Saved' : 'Save'}
+            </button>
+            : <button className="btn ghost" onClick={() => { onClose(); go('/auth?next=/') }}>Sign in to save</button>}
           <button className="btn ghost" onClick={onClose}>Close</button>
         </div>
       </div>

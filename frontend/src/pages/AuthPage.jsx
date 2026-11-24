@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { Wordmark } from '../ui.jsx'
-import { useAuth } from '../store.jsx'
+import { go, useAuth } from '../store.jsx'
 
-export default function AuthPage() {
+export default function AuthPage({ nextPath = '/' }) {
   const { signIn, signUp } = useAuth()
   const [mode, setMode] = useState('in')
   const [f, setF] = useState({ name: '', email: '', password: '' })
@@ -15,6 +15,7 @@ export default function AuthPage() {
     setBusy(true); setErr('')
     try {
       await (mode === 'in' ? signIn(f.email, f.password) : signUp(f.name, f.email, f.password))
+      go(nextPath)
     } catch (x) {
       setErr(x.message); setBusy(false)
     }

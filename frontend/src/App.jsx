@@ -9,6 +9,7 @@ import Library from './pages/Library.jsx'
 import History from './pages/History.jsx'
 import Saved from './pages/Saved.jsx'
 import Profile from './pages/Profile.jsx'
+import Upload from './pages/Upload.jsx'
 
 function Splash() {
   return (
@@ -44,20 +45,24 @@ function Header({ path, onSearch }) {
           {open && (
             <nav className="menu" aria-label="Navigate">
               <h6>NAVIGATE</h6>
-              {MENU.map(([label, p]) => (
+              {MENU.filter(([, p]) => user || p === '/' || p === '/explore').map(([label, p]) => (
                 <a key={p} href={'#' + p} className={active(p) ? 'on' : ''}><i />{label}</a>
               ))}
-              <hr />
-              <a href="#/profile" className={path === '/profile' ? 'on' : ''}><Icon name="user" size={16} /> View Profile</a>
-              <button onClick={logout}>Sign out</button>
+              {user ? <>
+                <hr />
+                <a href="#/profile" className={path === '/profile' ? 'on' : ''}><Icon name="user" size={16} /> View Profile</a>
+                <button onClick={logout}>Sign out</button>
+              </> : <a href="#/auth?next=/"><Icon name="user" size={16} /> Sign in / Create account</a>}
             </nav>
           )}
         </div>
         <a href="#/" className="brand" aria-label="Dhvani home"><Wordmark height={22} /></a>
-        <nav className="links">{NAV.map(([label, p]) => <a key={p} href={'#' + p} className={active(p) ? 'on' : ''}>{label}</a>)}</nav>
+        <nav className="links">{NAV.filter(([, p]) => user || p !== '/library').map(([label, p]) => <a key={p} href={'#' + p} className={active(p) ? 'on' : ''}>{label}</a>)}</nav>
         <div className="right">
           <button className="icon-btn" onClick={onSearch} aria-label="Search"><Icon name="search" size={20} /></button>
-          <a href="#/profile" className="avatar" aria-label="Profile">{(user?.name || '?').charAt(0).toUpperCase()}</a>
+          {user
+            ? <a href="#/profile" className="avatar" aria-label="Profile">{user.name.charAt(0).toUpperCase()}</a>
+            : <a href="#/auth?next=/" className="btn sm">Sign in</a>}
         </div>
       </div>
     </header>
@@ -66,6 +71,7 @@ function Header({ path, onSearch }) {
 
 function Layout() {
   const path = useRoute()
+  const { user } = useAuth()
   const [search, setSearch] = useState(false)
   const [song, setSong] = useState(null)
   const ui = { openSearch: useCallback(() => setSearch(true), []), openSong: useCallback((s) => setSong(s), []) }
@@ -80,8 +86,17 @@ function Layout() {
     return () => window.removeEventListener('keydown', h)
   }, [])
 
-  const page = { '/': <Home />, '/identify': <Home scrollToIdentify />, '/explore': <Explore />, '/library': <Library />,
-    '/history': <History />, '/saved': <Saved />, '/profile': <Profile /> }[path] || <Home />
+  const protectedPaths = ['/history', '/library', '/saved', '/profile', '/upload']
+  const nextPath = () => {
+    const next = new URLSearchParams(location.hash.split('?')[1] || '').get('next')
+    return next?.startsWith('/') && next !== '/auth' ? next : '/'
+  }
+  const page = path === '/auth'
+    ? <AuthPage nextPath={nextPath()} />
+    : !user && protectedPaths.includes(path)
+      ? <AuthPage nextPath={path} />
+      : ({ '/': <Home />, '/identify': <Home scrollToIdentify />, '/explore': <Explore />, '/library': <Library />,
+        '/history': <History />, '/saved': <Saved />, '/profile': <Profile />, '/upload': <Upload /> }[path] || <Home />)
   return (
     <UICtx.Provider value={ui}>
       <Header path={path} onSearch={ui.openSearch} />
@@ -94,7 +109,7 @@ function Layout() {
 }
 
 function Shell() {
-  const { user, ready } = useAuth()
+  const { ready } = useAuth()
   const [splash, setSplash] = useState(() => { try { return !sessionStorage.getItem('dhvani_seen') } catch { return true } })
   useEffect(() => {
     if (!splash) return
@@ -103,7 +118,6 @@ function Shell() {
   }, [splash])
   if (splash) return <Splash />
   if (!ready) return <div className="boot" />
-  if (!user) return <AuthPage />
   return <LibraryProvider><Layout /></LibraryProvider>
 }
 

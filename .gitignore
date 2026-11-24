@@ -3,3 +3,5 @@ frontend/dist/
 samples/
 dhwani-server
 *.log
+.env
+.env.local

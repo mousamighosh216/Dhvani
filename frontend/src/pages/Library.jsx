@@ -5,7 +5,7 @@ import { Icon } from '../ui.jsx'
 import { useAuth, useLibrary } from '../store.jsx'
 import { SongRow } from './Explore.jsx'
 
-function AddSong() {
+export function AddSong() {
   const [msg, setMsg] = useState(null)
   const [busy, setBusy] = useState(false)
   async function submit(e) {
