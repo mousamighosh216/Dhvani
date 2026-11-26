@@ -38,13 +38,13 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/v1/me", s.authed(s.me))
 	mux.HandleFunc("PATCH /api/v1/me", s.authed(s.updateMe))
 
-	mux.HandleFunc("POST /api/v1/recognize", s.optionalAuth(s.recognize))
+	mux.HandleFunc("POST /api/v1/recognize", s.authed(s.recognize))
 	mux.HandleFunc("GET /api/v1/history", s.authed(s.history))
 
 	mux.HandleFunc("POST /api/v1/songs", s.authed(s.addSong))
-	mux.HandleFunc("GET /api/v1/songs", s.public(s.listSongs))
-	mux.HandleFunc("GET /api/v1/songs/{id}", s.public(s.getSong))
-	mux.HandleFunc("GET /api/v1/genres", s.public(s.genres))
+	mux.HandleFunc("GET /api/v1/songs", s.authed(s.listSongs))
+	mux.HandleFunc("GET /api/v1/songs/{id}", s.authed(s.getSong))
+	mux.HandleFunc("GET /api/v1/genres", s.authed(s.genres))
 
 	mux.HandleFunc("GET /api/v1/collections", s.authed(s.collections))
 	mux.HandleFunc("POST /api/v1/collections", s.authed(s.createCollection))
@@ -94,23 +94,6 @@ func (s *Server) authed(h authedHandler) http.HandlerFunc {
 			return
 		}
 		h(w, r, uid)
-	}
-}
-
-func (s *Server) optionalAuth(h authedHandler) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		tok, found := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
-		uid := 0
-		if found {
-			uid, _ = auth.Verify(s.Secret, tok)
-		}
-		h(w, r, uid)
-	}
-}
-
-func (s *Server) public(h authedHandler) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		h(w, r, 0)
 	}
 }
 
@@ -166,10 +149,8 @@ func (s *Server) recognize(w http.ResponseWriter, r *http.Request, uid int) {
 		}
 		out["song"] = song
 		out["match_offset_seconds"] = float64(res.OffsetFrames*recognition.Hop) / audio.SampleRate
-		if uid > 0 {
-			if err := s.Store.AddHistory(r.Context(), uid, song.ID, res.Confidence); err != nil {
-				log.Printf("add history: %v", err) // the match itself is still valid
-			}
+		if err := s.Store.AddHistory(r.Context(), uid, song.ID, res.Confidence); err != nil {
+			log.Printf("add history: %v", err) // the match itself is still valid
 		}
 		others := []matchView{}
 		for _, c := range res.Others {

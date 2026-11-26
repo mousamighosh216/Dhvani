@@ -13,9 +13,21 @@ function Carousel() {
   useEffect(() => { api.getSongs({ sort: 'popular', limit: 7 }).then(setSongs).catch(() => setSongs([])) }, [])
 
   if (songs && songs.length === 0) {
-    return <div className="carousel"><div className="slide pos0 empty-card"><Icon name="music" size={34} /><strong>Your catalog is empty</strong><p>Be the first to <a href={user ? '#/upload' : '#/auth?next=/upload'}>add a song</a>.</p></div></div>
+    return (
+      <div className="carousel">
+        <div className="stage">
+          <div className="slide pos0 empty-card">
+            <Icon name="music" size={34} />
+            <strong>Your catalog is empty</strong>
+            <p>Be the first to <a href={user ? '#/upload' : '#/auth?next=/upload'}>add a song</a>.</p>
+          </div>
+        </div>
+      </div>
+    )
   }
-  if (!songs) return <div className="carousel" />
+  if (!songs) return (
+    <div className="carousel" />
+  )
   const n = songs.length
   const pos = (k) => { const d = (k - i + n) % n; return d === 0 ? 0 : d === 1 ? 1 : d === n - 1 ? -1 : 9 }
   return (

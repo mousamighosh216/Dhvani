@@ -57,7 +57,7 @@ function Header({ path, onSearch }) {
           )}
         </div>
         <a href="#/" className="brand" aria-label="Dhvani home"><Wordmark height={22} /></a>
-        <nav className="links">{NAV.filter(([, p]) => user || p !== '/library').map(([label, p]) => <a key={p} href={'#' + p} className={active(p) ? 'on' : ''}>{label}</a>)}</nav>
+        {/* <nav className="links">{NAV.filter(([, p]) => user || p !== '/library').map(([label, p]) => <a key={p} href={'#' + p} className={active(p) ? 'on' : ''}>{label}</a>)}</nav> */}
         <div className="right">
           <button className="icon-btn" onClick={onSearch} aria-label="Search"><Icon name="search" size={20} /></button>
           {user
