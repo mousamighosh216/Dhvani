@@ -28,6 +28,8 @@ type Server struct {
 }
 
 type authedHandler func(w http.ResponseWriter, r *http.Request, userID int)
+type publicHandler func(w http.ResponseWriter, r *http.Request, userID int)
+type adminHandler func(w http.ResponseWriter, r *http.Request, userID int)
 
 func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
@@ -38,19 +40,23 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/v1/me", s.authed(s.me))
 	mux.HandleFunc("PATCH /api/v1/me", s.authed(s.updateMe))
 
-	mux.HandleFunc("POST /api/v1/recognize", s.authed(s.recognize))
+	mux.HandleFunc("POST /api/v1/recognize", s.optionalAuth(s.recognize))
 	mux.HandleFunc("GET /api/v1/history", s.authed(s.history))
 
 	mux.HandleFunc("POST /api/v1/songs", s.authed(s.addSong))
-	mux.HandleFunc("GET /api/v1/songs", s.authed(s.listSongs))
-	mux.HandleFunc("GET /api/v1/songs/{id}", s.authed(s.getSong))
-	mux.HandleFunc("GET /api/v1/genres", s.authed(s.genres))
+	mux.HandleFunc("GET /api/v1/songs", s.optionalAuth(s.listSongs))
+	mux.HandleFunc("GET /api/v1/songs/{id}", s.optionalAuth(s.getSong))
+	mux.HandleFunc("GET /api/v1/genres", s.optionalAuth(s.genres))
+	mux.HandleFunc("GET /api/v1/me/uploads", s.authed(s.userUploads))
+	mux.HandleFunc("POST /api/v1/songs/{id}/removal-requests", s.authed(s.requestSongRemoval))
 
 	mux.HandleFunc("GET /api/v1/collections", s.authed(s.collections))
 	mux.HandleFunc("POST /api/v1/collections", s.authed(s.createCollection))
 	mux.HandleFunc("GET /api/v1/collections/{id}/songs", s.authed(s.collectionSongs)) // id "all" = every collection
 	mux.HandleFunc("PUT /api/v1/collections/{id}/songs/{songId}", s.authed(s.saveSong))
 	mux.HandleFunc("DELETE /api/v1/collections/{id}/songs/{songId}", s.authed(s.unsaveSong))
+	mux.HandleFunc("GET /api/v1/admin/removal-requests", s.admin(s.removalRequests))
+	mux.HandleFunc("PATCH /api/v1/admin/removal-requests/{id}", s.admin(s.reviewRemovalRequest))
 	return mux
 }
 
@@ -95,6 +101,31 @@ func (s *Server) authed(h authedHandler) http.HandlerFunc {
 		}
 		h(w, r, uid)
 	}
+}
+
+func (s *Server) optionalAuth(h publicHandler) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var uid int
+		if tok, found := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer "); found {
+			uid, _ = auth.Verify(s.Secret, tok)
+		}
+		h(w, r, uid)
+	}
+}
+
+func (s *Server) admin(h adminHandler) http.HandlerFunc {
+	return s.authed(func(w http.ResponseWriter, r *http.Request, uid int) {
+		isAdmin, err := s.Store.IsAdmin(r.Context(), uid)
+		if errors.Is(err, metadata.ErrNotFound) || (err == nil && !isAdmin) {
+			fail(w, 403, "administrator access required")
+			return
+		}
+		if err != nil {
+			serverError(w, "could not verify administrator access", err)
+			return
+		}
+		h(w, r, uid)
+	})
 }
 
 // readAudio parses the multipart "audio" field and decodes it.
@@ -149,8 +180,10 @@ func (s *Server) recognize(w http.ResponseWriter, r *http.Request, uid int) {
 		}
 		out["song"] = song
 		out["match_offset_seconds"] = float64(res.OffsetFrames*recognition.Hop) / audio.SampleRate
-		if err := s.Store.AddHistory(r.Context(), uid, song.ID, res.Confidence); err != nil {
-			log.Printf("add history: %v", err) // the match itself is still valid
+		if uid > 0 {
+			if err := s.Store.AddHistory(r.Context(), uid, song.ID, res.Confidence); err != nil {
+				log.Printf("add history: %v", err) // the match itself is still valid
+			}
 		}
 		others := []matchView{}
 		for _, c := range res.Others {

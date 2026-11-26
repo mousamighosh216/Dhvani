@@ -10,10 +10,12 @@ import (
 )
 
 var (
-	ErrNotFound   = errors.New("not found")
-	ErrDuplicate  = errors.New("song already exists for this artist")
-	ErrEmailTaken = errors.New("an account with this email already exists")
-	ErrNameTaken  = errors.New("you already have a collection with this name")
+	ErrNotFound       = errors.New("not found")
+	ErrDuplicate      = errors.New("song already exists for this artist")
+	ErrEmailTaken     = errors.New("an account with this email already exists")
+	ErrNameTaken      = errors.New("you already have a collection with this name")
+	ErrNotOwner       = errors.New("song not found or not uploaded by you")
+	ErrPendingRemoval = errors.New("a removal request is already pending")
 )
 
 // FavouritesName is the collection every user gets on sign-up.
@@ -33,7 +35,20 @@ type User struct {
 	Name         string    `json:"name"`
 	Email        string    `json:"email"`
 	CreateDate   time.Time `json:"create_date"`
+	IsAdmin      bool      `json:"is_admin"`
 	PasswordHash string    `json:"-"`
+}
+
+type UserUpload struct {
+	Song                 Song   `json:"song"`
+	RemovalRequestStatus string `json:"removal_request_status,omitempty"`
+}
+
+type RemovalRequest struct {
+	ID          int       `json:"id"`
+	Song        Song      `json:"song"`
+	RequestedBy string    `json:"requested_by"`
+	RequestedAt time.Time `json:"requested_at"`
 }
 
 type HistoryItem struct {
@@ -92,6 +107,7 @@ type Store interface {
 	UserByID(ctx context.Context, id int) (User, error)
 	UpdateUserName(ctx context.Context, id int, name string) (User, error)
 	UserStats(ctx context.Context, userID int) (UserStats, error)
+	IsAdmin(ctx context.Context, userID int) (bool, error)
 
 	// history
 	AddHistory(ctx context.Context, userID, songID int, confidence float64) error
@@ -103,4 +119,10 @@ type Store interface {
 	CollectionSongs(ctx context.Context, userID, collectionID int) ([]SavedSong, error)
 	AddToCollection(ctx context.Context, userID, collectionID, songID int) error
 	RemoveFromCollection(ctx context.Context, userID, collectionID, songID int) error
+
+	// catalog ownership and moderation
+	ListUserUploads(ctx context.Context, userID int) ([]UserUpload, error)
+	RequestSongRemoval(ctx context.Context, userID, songID int) error
+	ListRemovalRequests(ctx context.Context) ([]RemovalRequest, error)
+	ReviewRemovalRequest(ctx context.Context, adminID, requestID int, approve bool) error
 }

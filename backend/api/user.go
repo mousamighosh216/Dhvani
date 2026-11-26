@@ -203,3 +203,68 @@ func (s *Server) unsaveSong(w http.ResponseWriter, r *http.Request, uid int) {
 	}
 	ok(w, 200, "removed")
 }
+
+func (s *Server) userUploads(w http.ResponseWriter, r *http.Request, uid int) {
+	uploads, err := s.Store.ListUserUploads(r.Context(), uid)
+	if err != nil {
+		serverError(w, "could not load your uploads", err)
+		return
+	}
+	ok(w, 200, uploads)
+}
+
+func (s *Server) requestSongRemoval(w http.ResponseWriter, r *http.Request, uid int) {
+	songID, good := intParam(r, "id")
+	if !good {
+		fail(w, 400, "invalid song id")
+		return
+	}
+	switch err := s.Store.RequestSongRemoval(r.Context(), uid, songID); {
+	case errors.Is(err, metadata.ErrNotOwner):
+		fail(w, 404, err.Error())
+	case errors.Is(err, metadata.ErrPendingRemoval):
+		fail(w, 409, err.Error())
+	case err != nil:
+		serverError(w, "could not request song removal", err)
+	default:
+		ok(w, 202, "removal request submitted for review")
+	}
+}
+
+func (s *Server) removalRequests(w http.ResponseWriter, r *http.Request, _ int) {
+	requests, err := s.Store.ListRemovalRequests(r.Context())
+	if err != nil {
+		serverError(w, "could not load removal requests", err)
+		return
+	}
+	ok(w, 200, requests)
+}
+
+func (s *Server) reviewRemovalRequest(w http.ResponseWriter, r *http.Request, uid int) {
+	requestID, good := intParam(r, "id")
+	if !good {
+		fail(w, 400, "invalid request id")
+		return
+	}
+	var in struct{ Decision string }
+	if !readJSON(w, r, &in) {
+		return
+	}
+	if in.Decision != "approve" && in.Decision != "reject" {
+		fail(w, 400, "decision must be 'approve' or 'reject'")
+		return
+	}
+	err := s.Store.ReviewRemovalRequest(r.Context(), uid, requestID, in.Decision == "approve")
+	switch {
+	case errors.Is(err, metadata.ErrNotFound):
+		fail(w, 404, "pending removal request not found")
+	case err != nil:
+		serverError(w, "could not review removal request", err)
+	default:
+		result := "rejected"
+		if in.Decision == "approve" {
+			result = "approved"
+		}
+		ok(w, 200, result)
+	}
+}

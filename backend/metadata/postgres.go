@@ -59,9 +59,9 @@ func (p *Postgres) AddSong(ctx context.Context, userID int, s Song, fps []finger
 		return s, 0, err
 	}
 	err = tx.QueryRow(ctx,
-		`INSERT INTO songs (title, artist_id, genre, cover_image_url, duration)
-		 VALUES ($1, $2, NULLIF($3,''), NULLIF($4,''), $5) RETURNING id`,
-		s.Title, artistID, s.Genre, s.CoverImageURL, s.Duration).Scan(&s.ID)
+		`INSERT INTO songs (title, artist_id, genre, cover_image_url, duration, uploaded_by_user_id)
+		 VALUES ($1, $2, NULLIF($3,''), NULLIF($4,''), $5, NULLIF($6, 0)) RETURNING id`,
+		s.Title, artistID, s.Genre, s.CoverImageURL, s.Duration, userID).Scan(&s.ID)
 	if err != nil {
 		if pgCode(err, "23505") {
 			return s, 0, ErrDuplicate
@@ -191,11 +191,11 @@ func (p *Postgres) Genres(ctx context.Context) ([]GenreCount, error) {
 
 // ---- users ----
 
-const userCols = `id, name, email::text, COALESCE(create_date, NOW() AT TIME ZONE 'UTC'), password_hash`
+const userCols = `id, name, email::text, COALESCE(create_date, NOW() AT TIME ZONE 'UTC'), is_admin, password_hash`
 
 func scanUser(row pgx.Row) (User, error) {
 	var u User
-	err := row.Scan(&u.ID, &u.Name, &u.Email, &u.CreateDate, &u.PasswordHash)
+	err := row.Scan(&u.ID, &u.Name, &u.Email, &u.CreateDate, &u.IsAdmin, &u.PasswordHash)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return u, ErrNotFound
 	}
@@ -244,6 +244,15 @@ func (p *Postgres) UserStats(ctx context.Context, uid int) (UserStats, error) {
 	  (SELECT count(*) FROM collections WHERE user_id = $1)`, uid).
 		Scan(&s.Identifications, &s.UniqueSongs, &s.ThisMonth, &s.Saved, &s.Collections)
 	return s, err
+}
+
+func (p *Postgres) IsAdmin(ctx context.Context, uid int) (bool, error) {
+	var isAdmin bool
+	err := p.pool.QueryRow(ctx, `SELECT is_admin FROM users WHERE id = $1`, uid).Scan(&isAdmin)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, ErrNotFound
+	}
+	return isAdmin, err
 }
 
 // ---- history ----
@@ -358,4 +367,125 @@ func (p *Postgres) RemoveFromCollection(ctx context.Context, userID, collectionI
 		 WHERE cs.collection_id = c.id AND c.user_id = $1 AND ($2::int = 0 OR c.id = $2::int) AND cs.song_id = $3`,
 		userID, collectionID, songID)
 	return err
+}
+
+// ---- uploads and moderation ----
+
+func (p *Postgres) ListUserUploads(ctx context.Context, userID int) ([]UserUpload, error) {
+	rows, err := p.pool.Query(ctx,
+		`SELECT COALESCE((SELECT r.status FROM song_removal_requests r
+		                  WHERE r.song_id = s.id ORDER BY r.id DESC LIMIT 1), ''), `+songCols+songFrom+
+			` WHERE s.uploaded_by_user_id = $1 ORDER BY s.id DESC`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []UserUpload{}
+	for rows.Next() {
+		var item UserUpload
+		if err := rows.Scan(&item.RemovalRequestStatus, &item.Song.ID, &item.Song.Title, &item.Song.Artist,
+			&item.Song.Genre, &item.Song.CoverImageURL, &item.Song.Duration); err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
+func (p *Postgres) RequestSongRemoval(ctx context.Context, userID, songID int) error {
+	var requestID int
+	err := p.pool.QueryRow(ctx,
+		`INSERT INTO song_removal_requests (song_id, requested_by_user_id)
+		 SELECT id, $2 FROM songs WHERE id = $1 AND uploaded_by_user_id = $2
+		 ON CONFLICT (song_id) WHERE status = 'pending' DO NOTHING
+		 RETURNING id`, songID, userID).Scan(&requestID)
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return err
+	}
+	var owned, pending bool
+	if err := p.pool.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM songs WHERE id = $1 AND uploaded_by_user_id = $2),
+		        EXISTS (SELECT 1 FROM song_removal_requests WHERE song_id = $1 AND status = 'pending')`,
+		songID, userID).Scan(&owned, &pending); err != nil {
+		return err
+	}
+	if !owned {
+		return ErrNotOwner
+	}
+	if pending {
+		return ErrPendingRemoval
+	}
+	return ErrNotOwner
+}
+
+func (p *Postgres) ListRemovalRequests(ctx context.Context) ([]RemovalRequest, error) {
+	rows, err := p.pool.Query(ctx,
+		`SELECT r.id, COALESCE(u.name, 'Deleted user'), r.requested_at, `+songCols+
+			` FROM song_removal_requests r
+			  JOIN songs s ON s.id = r.song_id
+			  JOIN artists a ON a.id = s.artist_id
+			  LEFT JOIN users u ON u.id = r.requested_by_user_id
+			 WHERE r.status = 'pending' ORDER BY r.requested_at, r.id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []RemovalRequest{}
+	for rows.Next() {
+		var request RemovalRequest
+		request.Song, err = scanSong(rows, &request.ID, &request.RequestedBy, &request.RequestedAt)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, request)
+	}
+	return out, rows.Err()
+}
+
+func (p *Postgres) ReviewRemovalRequest(ctx context.Context, adminID, requestID int, approve bool) error {
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	var isAdmin bool
+	if err := tx.QueryRow(ctx, `SELECT is_admin FROM users WHERE id = $1`, adminID).Scan(&isAdmin); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		return err
+	}
+	if !isAdmin {
+		return ErrNotFound
+	}
+
+	var songID int
+	err = tx.QueryRow(ctx,
+		`SELECT song_id FROM song_removal_requests WHERE id = $1 AND status = 'pending' FOR UPDATE`,
+		requestID).Scan(&songID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	status := "rejected"
+	if approve {
+		status = "approved"
+	}
+	if _, err := tx.Exec(ctx,
+		`UPDATE song_removal_requests SET status = $2, reviewed_by_user_id = $3,
+		 reviewed_at = NOW() AT TIME ZONE 'UTC' WHERE id = $1`, requestID, status, adminID); err != nil {
+		return err
+	}
+	if approve {
+		if _, err := tx.Exec(ctx, `DELETE FROM songs WHERE id = $1`, songID); err != nil {
+			return err
+		}
+	}
+	return tx.Commit(ctx)
 }

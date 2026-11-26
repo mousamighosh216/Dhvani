@@ -8,7 +8,7 @@ Go API + PostgreSQL + React/Vite frontend in the Dhvani mint/teal design (Manrop
 ```text
 database/migrations/001_initial_schema.sql              your schema (artists, users, updates, songs, fingerprints)
 database/migrations/002_accounts_history_collections.sql  password_hash, recognition_history, collections, collection_songs
-database/migrations/003_fingerprint_offsets.sql          repairs legacy fingerprint schemas
+database/migrations/004_catalog_ownership_and_moderation.sql  song upload ownership and removal requests
 docker-compose.yml                                      Postgres 16; applies migrations on first start
 backend/    main.go · auth/ · api/ · metadata/ · recognition/
 frontend/   src/App.jsx · pages/ (Home, Explore, Library, History, Saved, Profile, AuthPage) · ui.jsx · styles.css
@@ -26,18 +26,24 @@ cd backend && go mod tidy && go run .            # API on :8080  (no DATABASE_UR
 cd frontend && npm install && npm run dev        # UI on http://localhost:5173 (proxies /api to :8080)
 ```
 
-For an existing database, apply new migrations manually; Docker only runs init scripts when its data volume is first created:
+For an existing database, apply unapplied migrations manually; Docker only runs init scripts when its data volume is first created:
 
 ```bash
-docker compose exec -T db psql -U postgres -d dhwani -f /docker-entrypoint-initdb.d/003_fingerprint_offsets.sql
+docker compose exec -T db psql -U postgres -d dhwani -f /docker-entrypoint-initdb.d/004_catalog_ownership_and_moderation.sql
 # Or, with psql installed locally:
-psql "$DATABASE_URL" -f database/migrations/003_fingerprint_offsets.sql
+psql "$DATABASE_URL" -f database/migrations/004_catalog_ownership_and_moderation.sql
 ```
 
-If the migration finds fingerprint rows without stored offsets, it clears those rows but keeps song metadata. Re-upload those songs to rebuild their fingerprints and restore identification.
+To grant admin review access, first create the admin account, then set its role directly in PostgreSQL:
 
-After the splash screen, identify clips and browse the catalog without signing in. Sign in to save songs or view personal history; create an account or sign in to upload a song with its details.
+```sql
+UPDATE users SET is_admin = TRUE WHERE email = 'admin@example.com';
+```
+
+After the splash screen, identify clips and browse the shared catalog without signing in. Sign in to save songs or view personal history; create an account or sign in to upload a song with its details. Original audio files are discarded after fingerprinting; the catalog stores metadata and fingerprints, not playable/downloadable audio. Uploaders can request removal, and an admin must approve before a song is removed globally.
 Microphone recording needs `localhost` or HTTPS.
+
+Existing catalog songs have no uploader attribution because the previous schema only tracked artist-level updates. They remain public, but only uploads made after migration 004 appear in an account's upload list or can be submitted for uploader removal review.
 
 ## Screens
 
@@ -47,17 +53,21 @@ other likely matches) · Search (`/` or ⌘K) · Explore (genres, search) · Lib
 
 ## API
 
-JSON responses: `{"status":"success","data":…}` / `{"status":"error","message":…}`. Personal data and
-song uploads need `Authorization: Bearer <token>`. Recognition and read-only catalog endpoints are public.
+JSON responses: `{"status":"success","data":…}` / `{"status":"error","message":…}`. Personal data,
+song uploads, and removal requests need `Authorization: Bearer <token>`. Recognition and read-only
+catalog endpoints are public. Favorites and collections remain private to each user.
 
 | Endpoint | Purpose |
 |---|---|
 | `POST /api/v1/auth/register`, `/auth/login` | `{name,email,password}` / `{email,password}` → `{token,user}` |
 | `GET /api/v1/me`, `PATCH /api/v1/me` | profile + stats; rename |
-| `POST /api/v1/recognize` | Public multipart `audio` → match, confidence, offset, others; records history when signed in |
+| `POST /api/v1/recognize` | Public multipart `audio` → match, confidence, offset, others; records history only when signed in |
 | `GET /api/v1/history` | your identifications, newest first |
 | `GET /api/v1/songs?q=&genre=&sort=recent\|artist\|popular` · `GET /songs/{id}` · `GET /genres` | Public catalog |
-| `POST /api/v1/songs` | multipart `audio`, `title`, `artist`, `genre`, `cover_image_url` (records a row in `updates`) |
+| `POST /api/v1/songs` | Authenticated multipart `audio`, `title`, `artist`, `genre`, `cover_image_url`; stores fingerprints and attributes the song to the uploader |
+| `GET /api/v1/me/uploads` | your uploaded catalog songs and removal-request status |
+| `POST /api/v1/songs/{id}/removal-requests` | uploader requests admin review; does not immediately remove the shared song |
+| `GET /api/v1/admin/removal-requests` · `PATCH /api/v1/admin/removal-requests/{id}` | admins list requests and approve (`{"decision":"approve"}`) or reject (`{"decision":"reject"}`); approval removes the song and its fingerprints, history, and saved references for everyone |
 | `GET/POST /api/v1/collections` · `GET /collections/{id\|all}/songs` · `PUT/DELETE /collections/{id}/songs/{songId}` | saved matches |
 
 ## Decisions and deviations

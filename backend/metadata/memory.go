@@ -12,13 +12,17 @@ import (
 
 // Memory is a non-persistent Store for tests and running without a database.
 type Memory struct {
-	mu      sync.RWMutex
-	songs   []Song
-	idx     map[uint32][]Entry
-	users   []User
-	history []histRow
-	cols    []colRow
-	nextCol int
+	mu          sync.RWMutex
+	songs       []Song
+	idx         map[uint32][]Entry
+	users       []User
+	history     []histRow
+	cols        []colRow
+	nextCol     int
+	owners      map[int]int
+	deleted     map[int]bool
+	requests    []removalRow
+	nextRequest int
 }
 
 type histRow struct {
@@ -33,9 +37,20 @@ type colRow struct {
 	songs    map[int]time.Time
 }
 
-func NewMemory() *Memory { return &Memory{idx: map[uint32][]Entry{}, nextCol: 1} }
+type removalRow struct {
+	id, song, requester, reviewer int
+	status                        string
+	at                            time.Time
+}
 
-func (m *Memory) AddSong(_ context.Context, _ int, s Song, fps []fingerprint.Fingerprint) (Song, int, error) {
+func NewMemory() *Memory {
+	return &Memory{
+		idx: map[uint32][]Entry{}, nextCol: 1, nextRequest: 1,
+		owners: map[int]int{}, deleted: map[int]bool{},
+	}
+}
+
+func (m *Memory) AddSong(_ context.Context, userID int, s Song, fps []fingerprint.Fingerprint) (Song, int, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, x := range m.songs {
@@ -45,6 +60,9 @@ func (m *Memory) AddSong(_ context.Context, _ int, s Song, fps []fingerprint.Fin
 	}
 	s.ID = len(m.songs) + 1
 	m.songs = append(m.songs, s)
+	if userID > 0 {
+		m.owners[s.ID] = userID
+	}
 	seen := map[[2]uint32]bool{}
 	n := 0
 	for _, f := range fps {
@@ -65,7 +83,11 @@ func (m *Memory) Lookup(_ context.Context, hashes []uint32) (map[uint32][]Entry,
 	out := map[uint32][]Entry{}
 	for _, h := range hashes {
 		if e, ok := m.idx[h]; ok {
-			out[h] = e
+			for _, entry := range e {
+				if !m.deleted[entry.SongID] {
+					out[h] = append(out[h], entry)
+				}
+			}
 		}
 	}
 	return out, nil
@@ -78,7 +100,7 @@ func (m *Memory) GetSong(_ context.Context, id int) (Song, error) {
 }
 
 func (m *Memory) song(id int) (Song, error) {
-	if id < 1 || id > len(m.songs) {
+	if id < 1 || id > len(m.songs) || m.deleted[id] {
 		return Song{}, ErrNotFound
 	}
 	return m.songs[id-1], nil
@@ -90,6 +112,9 @@ func (m *Memory) SearchSongs(_ context.Context, q SongQuery) ([]Song, error) {
 	needle := strings.ToLower(q.Q)
 	var all []Song
 	for _, s := range m.songs {
+		if m.deleted[s.ID] {
+			continue
+		}
 		if needle != "" && !strings.Contains(strings.ToLower(s.Title+"\x00"+s.Artist+"\x00"+s.Genre), needle) {
 			continue
 		}
@@ -135,6 +160,9 @@ func (m *Memory) Genres(_ context.Context) ([]GenreCount, error) {
 	defer m.mu.RUnlock()
 	c := map[string]int{}
 	for _, s := range m.songs {
+		if m.deleted[s.ID] {
+			continue
+		}
 		if s.Genre != "" {
 			c[s.Genre]++
 		}
@@ -226,6 +254,24 @@ func (m *Memory) UserStats(_ context.Context, uid int) (UserStats, error) {
 	}
 	s.Saved = len(saved)
 	return s, nil
+}
+
+func (m *Memory) IsAdmin(_ context.Context, uid int) (bool, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if uid < 1 || uid > len(m.users) {
+		return false, ErrNotFound
+	}
+	return m.users[uid-1].IsAdmin, nil
+}
+
+// SetAdmin is intended for tests using the in-memory store.
+func (m *Memory) SetAdmin(uid int, enabled bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if uid > 0 && uid <= len(m.users) {
+		m.users[uid-1].IsAdmin = enabled
+	}
 }
 
 // ---- history ----
@@ -344,4 +390,108 @@ func (m *Memory) RemoveFromCollection(_ context.Context, uid, colID, songID int)
 		}
 	}
 	return nil
+}
+
+func (m *Memory) ListUserUploads(_ context.Context, uid int) ([]UserUpload, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := []UserUpload{}
+	for i := len(m.songs) - 1; i >= 0; i-- {
+		song := m.songs[i]
+		if m.owners[song.ID] != uid || m.deleted[song.ID] {
+			continue
+		}
+		item := UserUpload{Song: song}
+		for j := len(m.requests) - 1; j >= 0; j-- {
+			if m.requests[j].song == song.ID {
+				item.RemovalRequestStatus = m.requests[j].status
+				break
+			}
+		}
+		out = append(out, item)
+	}
+	return out, nil
+}
+
+func (m *Memory) RequestSongRemoval(_ context.Context, uid, songID int) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, err := m.song(songID); err != nil || m.owners[songID] != uid {
+		return ErrNotOwner
+	}
+	for _, request := range m.requests {
+		if request.song == songID && request.status == "pending" {
+			return ErrPendingRemoval
+		}
+	}
+	m.requests = append(m.requests, removalRow{
+		id: m.nextRequest, song: songID, requester: uid, status: "pending", at: time.Now().UTC(),
+	})
+	m.nextRequest++
+	return nil
+}
+
+func (m *Memory) ListRemovalRequests(_ context.Context) ([]RemovalRequest, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := []RemovalRequest{}
+	for i := len(m.requests) - 1; i >= 0; i-- {
+		request := m.requests[i]
+		if request.status != "pending" || m.deleted[request.song] {
+			continue
+		}
+		song, err := m.song(request.song)
+		if err != nil {
+			continue
+		}
+		requester := ""
+		if request.requester > 0 && request.requester <= len(m.users) {
+			requester = m.users[request.requester-1].Name
+		}
+		out = append(out, RemovalRequest{ID: request.id, Song: song, RequestedBy: requester, RequestedAt: request.at})
+	}
+	return out, nil
+}
+
+func (m *Memory) ReviewRemovalRequest(_ context.Context, adminID, requestID int, approve bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if adminID < 1 || adminID > len(m.users) || !m.users[adminID-1].IsAdmin {
+		return ErrNotFound
+	}
+	for i := range m.requests {
+		request := &m.requests[i]
+		if request.id != requestID || request.status != "pending" {
+			continue
+		}
+		if !approve {
+			request.status = "rejected"
+			request.reviewer = adminID
+			return nil
+		}
+		request.status = "approved"
+		request.reviewer = adminID
+		m.deleted[request.song] = true
+		for hash, entries := range m.idx {
+			kept := entries[:0]
+			for _, entry := range entries {
+				if entry.SongID != request.song {
+					kept = append(kept, entry)
+				}
+			}
+			m.idx[hash] = kept
+		}
+		for i := range m.cols {
+			delete(m.cols[i].songs, request.song)
+		}
+		history := m.history[:0]
+		for _, item := range m.history {
+			if item.song != request.song {
+				history = append(history, item)
+			}
+		}
+		m.history = history
+		return nil
+	}
+	return ErrNotFound
 }
