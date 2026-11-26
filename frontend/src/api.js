@@ -56,3 +56,7 @@ export const createCollection = (name) => call('/collections', { method: 'POST',
 export const getCollectionSongs = (id) => call(`/collections/${id}/songs`)
 export const saveSong = (cid, sid) => call(`/collections/${cid}/songs/${sid}`, { method: 'PUT' })
 export const unsaveSong = (cid, sid) => call(`/collections/${cid}/songs/${sid}`, { method: 'DELETE' })
+export const getUserUploads = () => call('/me/uploads')
+export const requestSongRemoval = (id) => call(`/songs/${id}/removal-requests`, { method: 'POST' })
+export const getRemovalRequests = () => call('/admin/removal-requests')
+export const reviewRemovalRequest = (id, decision) => call(`/admin/removal-requests/${id}`, { method: 'PATCH', json: { decision } })
